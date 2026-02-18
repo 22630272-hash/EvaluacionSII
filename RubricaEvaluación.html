@@ -339,6 +339,50 @@
             border-radius: 40px;
         }
 
+        /* Botón Generar PDF */
+        .pdf-section {
+            margin-top: 32px;
+            text-align: center;
+        }
+
+        .btn-pdf {
+            background: linear-gradient(135deg, #1b4f77 0%, #2b7fc1 100%);
+            color: white;
+            border: none;
+            padding: 20px 40px;
+            font-size: 1.15rem;
+            font-weight: 700;
+            border-radius: 60px;
+            cursor: pointer;
+            box-shadow: 0 10px 30px rgba(27, 79, 119, 0.35);
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 14px;
+            letter-spacing: 0.3px;
+        }
+
+        .btn-pdf:hover {
+            transform: translateY(-2px) scale(1.03);
+            box-shadow: 0 14px 36px rgba(27, 79, 119, 0.45);
+        }
+
+        .btn-pdf:active {
+            transform: scale(0.98);
+        }
+
+        .btn-pdf:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .pdf-hint {
+            margin-top: 10px;
+            font-size: 0.85rem;
+            color: #6b8ba8;
+        }
+
         /* Responsive */
         @media (max-width: 900px) {
             .dashboard {
@@ -349,6 +393,9 @@
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <!-- jsPDF + AutoTable para generación de reportes PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
 <div class="app-wrapper">
@@ -422,6 +469,14 @@
                 </tbody>
             </table>
         </div>
+    </div>
+
+    <!-- Sección de generación de PDF -->
+    <div class="pdf-section">
+        <button class="btn-pdf" id="btnPDF" onclick="generarReportePDF()">
+            <i class="fas fa-file-pdf" style="font-size:1.4rem;"></i> Generar Reporte PDF Oficial
+        </button>
+        <p class="pdf-hint">Descarga un documento oficial con todas las evaluaciones registradas</p>
     </div>
 </div>
 
@@ -753,14 +808,470 @@
         // Cargar historial al inicio
         cargarHistorial();
 
-        // Exponer función de preview global (para usar desde los radios)
+        // Exponer función de preview global
         window.calcularPreview = calcularPreview;
-        // También cuando se rendericen los radios, se añadirá event listener, pero ya lo hacemos en render.
-        // Además, necesitamos que al cambiar estudiante se actualice preview si ya había radios
-        // Eso ya se hace en render y calcularPreview.
 
-        // Inicialmente no hay estudiante, pero si el usuario selecciona uno, se dispara render.
-        // También podemos forzar un preview cuando se cambien notas.
+        // ═══════════════════════════════════════════════════════════════
+        // GENERADOR DE REPORTE PDF OFICIAL
+        // ═══════════════════════════════════════════════════════════════
+        window.generarReportePDF = async function() {
+            const btn = document.getElementById('btnPDF');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generando reporte...';
+
+            try {
+                // 1. Obtener TODAS las evaluaciones de Firestore
+                const snapshot = await db.collection('evaluaciones').orderBy('fecha', 'desc').get();
+
+                if (snapshot.empty) {
+                    alert('No hay evaluaciones registradas aún.');
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-file-pdf" style="font-size:1.4rem;"></i> Generar Reporte PDF Oficial';
+                    return;
+                }
+
+                const evaluaciones = [];
+                snapshot.forEach(doc => {
+                    const d = doc.data();
+                    evaluaciones.push(d);
+                });
+
+                // 2. Inicializar jsPDF
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'letter' });
+                const pageW = doc.internal.pageSize.getWidth();
+                const pageH = doc.internal.pageSize.getHeight();
+                const margin = 18;
+                const contentW = pageW - margin * 2;
+
+                // Colores institucionales
+                const azulOscuro = [17, 56, 85];      // #113855
+                const azulMedio  = [27, 79, 119];      // #1b4f77
+                const azulClaro  = [43, 127, 193];     // #2b7fc1
+                const grisClaro  = [234, 241, 249];    // #eaf1f9
+                const blanco     = [255, 255, 255];
+
+                // Helper: añadir encabezado/pie en cada página
+                function addHeaderFooter(pageNum, totalPages) {
+                    // Barra superior
+                    doc.setFillColor(...azulOscuro);
+                    doc.rect(0, 0, pageW, 14, 'F');
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(8);
+                    doc.setTextColor(...blanco);
+                    doc.text('TecNM · Sistema Integral de Información · Evaluación SII', margin, 9);
+                    doc.text(new Date().toLocaleDateString('es-MX', { year:'numeric', month:'long', day:'numeric' }), pageW - margin, 9, { align: 'right' });
+
+                    // Pie de página
+                    doc.setFillColor(...grisClaro);
+                    doc.rect(0, pageH - 12, pageW, 12, 'F');
+                    doc.setFontSize(7);
+                    doc.setTextColor(100, 100, 100);
+                    doc.text('Documento generado automáticamente — Sistema de Evaluación SII TecNM · Rúbrica Golden Standard', margin, pageH - 5);
+                    doc.text(`Página ${pageNum} de ${totalPages}`, pageW - margin, pageH - 5, { align: 'right' });
+                }
+
+                // ──────────────────────────────────────
+                // PORTADA
+                // ──────────────────────────────────────
+                // Fondo degradado simulado con rectángulos
+                doc.setFillColor(...azulOscuro);
+                doc.rect(0, 0, pageW, pageH, 'F');
+                doc.setFillColor(...azulMedio);
+                doc.rect(0, pageH * 0.6, pageW, pageH * 0.4, 'F');
+
+                // Línea decorativa
+                doc.setDrawColor(...azulClaro);
+                doc.setLineWidth(1.5);
+                doc.line(margin, 60, pageW - margin, 60);
+                doc.line(margin, 62, pageW - margin, 62);
+
+                // Texto de portada
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(11);
+                doc.setTextColor(180, 210, 240);
+                doc.text('TECNOLÓGICO NACIONAL DE MÉXICO', pageW / 2, 45, { align: 'center' });
+
+                doc.setFontSize(28);
+                doc.setTextColor(...blanco);
+                doc.text('REPORTE OFICIAL', pageW / 2, 82, { align: 'center' });
+                doc.setFontSize(22);
+                doc.text('DE EVALUACIONES', pageW / 2, 95, { align: 'center' });
+
+                // Línea decorativa bajo título
+                doc.setDrawColor(...azulClaro);
+                doc.setLineWidth(0.8);
+                doc.line(pageW / 2 - 50, 102, pageW / 2 + 50, 102);
+
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(14);
+                doc.setTextColor(180, 210, 240);
+                doc.text('Sistema Integral de Información (SII)', pageW / 2, 115, { align: 'center' });
+                doc.text('Rúbrica Golden Standard', pageW / 2, 125, { align: 'center' });
+
+                // Info box en portada
+                const boxY = 150;
+                doc.setFillColor(20, 65, 100);
+                doc.roundedRect(margin + 20, boxY, contentW - 40, 55, 6, 6, 'F');
+
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(...blanco);
+                doc.text('DATOS DEL REPORTE', pageW / 2, boxY + 14, { align: 'center' });
+
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(10);
+                const totalEstudiantes = [...new Set(evaluaciones.map(e => e.studentNombre))].length;
+                doc.text(`Total de evaluaciones registradas:  ${evaluaciones.length}`, pageW / 2, boxY + 28, { align: 'center' });
+                doc.text(`Estudiantes evaluados:  ${totalEstudiantes} de ${estudiantes.length}`, pageW / 2, boxY + 37, { align: 'center' });
+                doc.text(`Fecha de generación:  ${new Date().toLocaleDateString('es-MX', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}`, pageW / 2, boxY + 46, { align: 'center' });
+
+                // Ponderación
+                doc.setFontSize(9);
+                doc.setTextColor(140, 180, 220);
+                doc.text('Ponderación: 50% Grupal · 30% Técnica (Criterios) · 20% Evaluación de Pares', pageW / 2, 225, { align: 'center' });
+
+                // Footer portada
+                doc.setFontSize(8);
+                doc.setTextColor(100, 140, 180);
+                doc.text('Documento confidencial — Uso exclusivo del personal docente autorizado', pageW / 2, pageH - 20, { align: 'center' });
+
+                // ──────────────────────────────────────
+                // PÁGINA 2: RESUMEN ESTADÍSTICO
+                // ──────────────────────────────────────
+                doc.addPage();
+
+                // Calcular estadísticas
+                const promedioFinal = evaluaciones.reduce((s, e) => s + (e.notaFinal || 0), 0) / evaluaciones.length;
+                const promedioTecnica = evaluaciones.reduce((s, e) => s + (e.notaTecnica || 0), 0) / evaluaciones.length;
+                const promedioGrupal = evaluaciones.reduce((s, e) => s + (e.notaGrupal || 0), 0) / evaluaciones.length;
+                const promedioPares = evaluaciones.reduce((s, e) => s + (e.notaPares || 0), 0) / evaluaciones.length;
+
+                const notaMax = Math.max(...evaluaciones.map(e => e.notaFinal || 0));
+                const notaMin = Math.min(...evaluaciones.map(e => e.notaFinal || 0));
+
+                // Distribución por nivel
+                let nivSobresaliente = 0, nivAvanzado = 0, nivIntermedio = 0, nivNoAcreditado = 0;
+                evaluaciones.forEach(e => {
+                    const nf = e.notaFinal || 0;
+                    if (nf >= 90) nivSobresaliente++;
+                    else if (nf >= 80) nivAvanzado++;
+                    else if (nf >= 70) nivIntermedio++;
+                    else nivNoAcreditado++;
+                });
+
+                let y = 22;
+
+                // Título sección
+                doc.setFillColor(...azulOscuro);
+                doc.roundedRect(margin, y, contentW, 12, 3, 3, 'F');
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(13);
+                doc.setTextColor(...blanco);
+                doc.text('  RESUMEN ESTADÍSTICO GENERAL', margin + 4, y + 8.5);
+                y += 20;
+
+                // Tarjetas de métricas
+                const metricas = [
+                    { label: 'Promedio Final General', valor: promedioFinal.toFixed(1), color: azulOscuro },
+                    { label: 'Promedio Técnica (30%)', valor: promedioTecnica.toFixed(1), color: azulMedio },
+                    { label: 'Promedio Grupal (50%)', valor: promedioGrupal.toFixed(1), color: azulClaro },
+                    { label: 'Promedio Pares (20%)', valor: promedioPares.toFixed(1), color: [80, 140, 190] },
+                ];
+
+                const cardW = (contentW - 12) / 4;
+                metricas.forEach((m, i) => {
+                    const cx = margin + i * (cardW + 4);
+                    doc.setFillColor(...m.color);
+                    doc.roundedRect(cx, y, cardW, 28, 4, 4, 'F');
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(18);
+                    doc.setTextColor(...blanco);
+                    doc.text(m.valor, cx + cardW / 2, y + 14, { align: 'center' });
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(7);
+                    doc.text(m.label, cx + cardW / 2, y + 23, { align: 'center' });
+                });
+                y += 38;
+
+                // Rango de notas
+                doc.setFillColor(...grisClaro);
+                doc.roundedRect(margin, y, contentW, 14, 3, 3, 'F');
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(10);
+                doc.setTextColor(...azulOscuro);
+                doc.text(`Nota más alta: ${notaMax.toFixed(1)}   |   Nota más baja: ${notaMin.toFixed(1)}   |   Total evaluaciones: ${evaluaciones.length}`, pageW / 2, y + 9, { align: 'center' });
+                y += 24;
+
+                // Distribución por nivel de competencia
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(11);
+                doc.setTextColor(...azulOscuro);
+                doc.text('Distribución por Nivel de Competencia', margin, y);
+                y += 6;
+
+                doc.autoTable({
+                    startY: y,
+                    margin: { left: margin, right: margin },
+                    head: [['Nivel', 'Rango', 'Cantidad', 'Porcentaje']],
+                    body: [
+                        ['Competente Sobresaliente', '90 - 100', nivSobresaliente.toString(), ((nivSobresaliente / evaluaciones.length) * 100).toFixed(1) + '%'],
+                        ['Competente Avanzado', '80 - 89', nivAvanzado.toString(), ((nivAvanzado / evaluaciones.length) * 100).toFixed(1) + '%'],
+                        ['Competente Intermedio', '70 - 79', nivIntermedio.toString(), ((nivIntermedio / evaluaciones.length) * 100).toFixed(1) + '%'],
+                        ['No Acreditado', '< 70', nivNoAcreditado.toString(), ((nivNoAcreditado / evaluaciones.length) * 100).toFixed(1) + '%'],
+                    ],
+                    headStyles: { fillColor: azulOscuro, textColor: blanco, fontStyle: 'bold', fontSize: 9 },
+                    bodyStyles: { fontSize: 9, textColor: [30, 50, 70] },
+                    alternateRowStyles: { fillColor: [245, 249, 253] },
+                    styles: { cellPadding: 4, lineColor: [220, 230, 240], lineWidth: 0.3 },
+                    columnStyles: {
+                        2: { halign: 'center' },
+                        3: { halign: 'center', fontStyle: 'bold' }
+                    }
+                });
+                y = doc.lastAutoTable.finalY + 16;
+
+                // Barra visual de distribución
+                const barY = y;
+                const barH = 10;
+                const total = evaluaciones.length;
+                const segmentos = [
+                    { count: nivSobresaliente, color: [39, 174, 96], label: 'Sobresaliente' },
+                    { count: nivAvanzado, color: [41, 128, 185], label: 'Avanzado' },
+                    { count: nivIntermedio, color: [243, 156, 18], label: 'Intermedio' },
+                    { count: nivNoAcreditado, color: [192, 57, 43], label: 'No Acreditado' }
+                ];
+                let barX = margin;
+                segmentos.forEach(seg => {
+                    const w = (seg.count / total) * contentW;
+                    if (w > 0) {
+                        doc.setFillColor(...seg.color);
+                        doc.roundedRect(barX, barY, Math.max(w, 2), barH, 2, 2, 'F');
+                        if (w > 15) {
+                            doc.setFont('helvetica', 'bold');
+                            doc.setFontSize(7);
+                            doc.setTextColor(...blanco);
+                            doc.text(`${seg.count}`, barX + w / 2, barY + barH / 2 + 2, { align: 'center' });
+                        }
+                        barX += w;
+                    }
+                });
+                y = barY + barH + 6;
+
+                // Leyenda de la barra
+                let legendX = margin;
+                segmentos.forEach(seg => {
+                    doc.setFillColor(...seg.color);
+                    doc.circle(legendX + 2, y + 2, 2, 'F');
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(7);
+                    doc.setTextColor(60, 60, 60);
+                    doc.text(seg.label, legendX + 6, y + 3.5);
+                    legendX += 42;
+                });
+
+                // ──────────────────────────────────────
+                // PÁGINA 3: TABLA GENERAL DE RESULTADOS
+                // ──────────────────────────────────────
+                doc.addPage();
+                y = 22;
+
+                doc.setFillColor(...azulOscuro);
+                doc.roundedRect(margin, y, contentW, 12, 3, 3, 'F');
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(13);
+                doc.setTextColor(...blanco);
+                doc.text('  TABLA GENERAL DE RESULTADOS', margin + 4, y + 8.5);
+                y += 18;
+
+                // Agrupar por estudiante (última evaluación más reciente)
+                const porEstudiante = {};
+                evaluaciones.forEach(e => {
+                    const nombre = e.studentNombre;
+                    if (!porEstudiante[nombre]) {
+                        porEstudiante[nombre] = e;
+                    }
+                    // ya están ordenadas por fecha desc, así que la primera es la más reciente
+                });
+
+                const filasTabla = Object.values(porEstudiante).map(e => {
+                    const nivel = e.notaFinal >= 90 ? 'Sobresaliente' :
+                                  e.notaFinal >= 80 ? 'Avanzado' :
+                                  e.notaFinal >= 70 ? 'Intermedio' : 'No Acreditado';
+                    return [
+                        e.studentNombre + (e.esLider ? '  [LIDER]' : ''),
+                        (e.notaTecnica || 0).toFixed(1),
+                        (e.notaGrupal || 0).toFixed(1),
+                        (e.notaPares || 0).toFixed(1),
+                        (e.notaFinal || 0).toFixed(1),
+                        nivel
+                    ];
+                });
+
+                // Ordenar por nota final descendente
+                filasTabla.sort((a, b) => parseFloat(b[4]) - parseFloat(a[4]));
+
+                // Agregar número de posición
+                const filasConPos = filasTabla.map((f, i) => [String(i + 1), ...f]);
+
+                doc.autoTable({
+                    startY: y,
+                    margin: { left: margin, right: margin },
+                    head: [['#', 'Estudiante', 'Técnica', 'Grupal', 'Pares', 'Final', 'Nivel']],
+                    body: filasConPos,
+                    headStyles: { fillColor: azulOscuro, textColor: blanco, fontStyle: 'bold', fontSize: 8.5 },
+                    bodyStyles: { fontSize: 8, textColor: [30, 50, 70] },
+                    alternateRowStyles: { fillColor: [245, 249, 253] },
+                    styles: { cellPadding: 3.5, lineColor: [220, 230, 240], lineWidth: 0.3, overflow: 'linebreak' },
+                    columnStyles: {
+                        0: { halign: 'center', cellWidth: 8 },
+                        1: { cellWidth: 60 },
+                        2: { halign: 'center', cellWidth: 18 },
+                        3: { halign: 'center', cellWidth: 18 },
+                        4: { halign: 'center', cellWidth: 18 },
+                        5: { halign: 'center', cellWidth: 18, fontStyle: 'bold' },
+                        6: { cellWidth: 28, fontSize: 7 }
+                    },
+                    didParseCell: function(data) {
+                        if (data.section === 'body' && data.column.index === 5) {
+                            const val = parseFloat(data.cell.raw);
+                            if (val >= 90) data.cell.styles.textColor = [39, 174, 96];
+                            else if (val >= 80) data.cell.styles.textColor = [41, 128, 185];
+                            else if (val >= 70) data.cell.styles.textColor = [243, 156, 18];
+                            else data.cell.styles.textColor = [192, 57, 43];
+                        }
+                    }
+                });
+
+                // ──────────────────────────────────────
+                // PÁGINAS DE DETALLE POR ESTUDIANTE
+                // ──────────────────────────────────────
+                // Mapeo de IDs de criterios a nombres legibles
+                const criterioNombres = {
+                    'dominio': 'Dominio Tecnológico',
+                    'arquitectura': 'Arquitectura y Calidad',
+                    'impacto': 'Impacto y Funcionalidad',
+                    'metodologia': 'Metodología de Investigación',
+                    'colaboracion': 'Colaboración y Gestión',
+                    'gestion_liderazgo': 'Gestión de Liderazgo'
+                };
+
+                const nivelNombres = {
+                    'sobresaliente': 'Competente Sobresaliente (90-100)',
+                    'avanzado': 'Competente Avanzado (80-89)',
+                    'intermedio': 'Competente Intermedio (70-79)',
+                    'no_acreditado': 'No Acreditado (<70)'
+                };
+
+                // Agregar nueva página para sección de detalles
+                doc.addPage();
+                y = 22;
+
+                doc.setFillColor(...azulOscuro);
+                doc.roundedRect(margin, y, contentW, 12, 3, 3, 'F');
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(13);
+                doc.setTextColor(...blanco);
+                doc.text('  DETALLE INDIVIDUAL POR ESTUDIANTE', margin + 4, y + 8.5);
+                y += 20;
+
+                // Iterar evaluaciones (agrupadas por estudiante)
+                const nombresYaProcesados = new Set();
+                evaluaciones.forEach(ev => {
+                    // Solo mostrar la más reciente de cada estudiante (ya están ordenadas desc)
+                    if (nombresYaProcesados.has(ev.studentNombre)) return;
+                    nombresYaProcesados.add(ev.studentNombre);
+
+                    // Verificar si hay espacio, si no, nueva página
+                    if (y > pageH - 80) {
+                        doc.addPage();
+                        y = 22;
+                    }
+
+                    // Nombre del estudiante
+                    doc.setFillColor(...azulMedio);
+                    doc.roundedRect(margin, y, contentW, 10, 3, 3, 'F');
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(10);
+                    doc.setTextColor(...blanco);
+                    const nombreDisplay = ev.studentNombre + (ev.esLider ? '  [LIDER DE EQUIPO]' : '');
+                    doc.text('  ' + nombreDisplay, margin + 3, y + 7);
+
+                    const fechaEval = ev.fecha ? new Date(ev.fecha.seconds * 1000).toLocaleDateString('es-MX', { year:'numeric', month:'long', day:'numeric' }) : 'Sin fecha';
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(7);
+                    doc.text('Evaluado: ' + fechaEval, pageW - margin - 3, y + 7, { align: 'right' });
+                    y += 14;
+
+                    // Tabla de criterios del estudiante
+                    const criteriosData = (ev.criterios || []).map(c => [
+                        criterioNombres[c.criterio] || c.criterio,
+                        nivelNombres[c.nivel] || c.nivel
+                    ]);
+
+                    if (criteriosData.length > 0) {
+                        doc.autoTable({
+                            startY: y,
+                            margin: { left: margin + 4, right: margin + 4 },
+                            head: [['Criterio', 'Nivel Alcanzado']],
+                            body: criteriosData,
+                            headStyles: { fillColor: [60, 110, 150], textColor: blanco, fontStyle: 'bold', fontSize: 8 },
+                            bodyStyles: { fontSize: 8, textColor: [40, 60, 80] },
+                            alternateRowStyles: { fillColor: [248, 251, 255] },
+                            styles: { cellPadding: 3, lineColor: [220, 230, 240], lineWidth: 0.2 },
+                            columnStyles: {
+                                0: { cellWidth: 55, fontStyle: 'bold' },
+                                1: { cellWidth: 100 }
+                            },
+                            tableWidth: contentW - 8
+                        });
+                        y = doc.lastAutoTable.finalY + 3;
+                    }
+
+                    // Resumen de notas del estudiante
+                    doc.setFillColor(245, 249, 253);
+                    doc.roundedRect(margin + 4, y, contentW - 8, 11, 2, 2, 'F');
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(8);
+                    doc.setTextColor(...azulOscuro);
+                    const resumenTexto = `Técnica: ${(ev.notaTecnica||0).toFixed(1)}  ×0.30  |  Grupal: ${(ev.notaGrupal||0).toFixed(1)}  ×0.50  |  Pares: ${(ev.notaPares||0).toFixed(1)}  ×0.20`;
+                    doc.text(resumenTexto, margin + 10, y + 5);
+
+                    // Nota final destacada
+                    const nfVal = (ev.notaFinal || 0).toFixed(1);
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(10);
+                    const nfColor = ev.notaFinal >= 90 ? [39, 174, 96] :
+                                    ev.notaFinal >= 80 ? [41, 128, 185] :
+                                    ev.notaFinal >= 70 ? [243, 156, 18] : [192, 57, 43];
+                    doc.setTextColor(...nfColor);
+                    doc.text(`NOTA FINAL: ${nfVal}`, pageW - margin - 8, y + 7, { align: 'right' });
+
+                    y += 18;
+                });
+
+                // ──────────────────────────────────────
+                // AGREGAR HEADERS/FOOTERS A TODAS LAS PÁGINAS
+                // ──────────────────────────────────────
+                const totalPages = doc.internal.getNumberOfPages();
+                for (let i = 2; i <= totalPages; i++) {
+                    doc.setPage(i);
+                    addHeaderFooter(i - 1, totalPages - 1);
+                }
+
+                // Guardar
+                const fechaArchivo = new Date().toISOString().split('T')[0];
+                doc.save(`Reporte_Evaluaciones_SII_${fechaArchivo}.pdf`);
+
+            } catch (err) {
+                console.error('Error generando PDF:', err);
+                alert('Error al generar el reporte: ' + err.message);
+            } finally {
+                const btn2 = document.getElementById('btnPDF');
+                btn2.disabled = false;
+                btn2.innerHTML = '<i class="fas fa-file-pdf" style="font-size:1.4rem;"></i> Generar Reporte PDF Oficial';
+            }
+        };
     })();
 </script>
 </body>
