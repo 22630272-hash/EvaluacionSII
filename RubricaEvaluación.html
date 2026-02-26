@@ -671,8 +671,10 @@
             const notaTecnica = puntajes.reduce((a,b) => a+b,0) / puntajes.length;
             const grupal = parseFloat(notaGrupalInput.value) || 0;
             const pares = parseFloat(notaParesInput.value) || 0;
-            const notaFinal = (grupal * 0.5) + (notaTecnica * 0.3) + (pares * 0.2);
-            previewFinal.textContent = notaFinal.toFixed(1);
+            // Aplicamos Math.ceil aquí:
+            const notaFinal = Math.ceil((grupal * 0.5) + (notaTecnica * 0.3) + (pares * 0.2));
+            // Quitamos el .toFixed(1) para que se muestre como entero
+            previewFinal.textContent = notaFinal;
         }
 
         // Evento cambio de estudiante para renderizar criterios
@@ -750,7 +752,8 @@
                 document.getElementById('formMessage').innerText = '❌ Notas inválidas.';
                 return;
             }
-            const notaFinal = grupal * 0.5 + notaTecnica * 0.3 + pares * 0.2;
+            // Aplicamos Math.ceil aquí para que a la base de datos ya entre redondeado:
+            const notaFinal = Math.ceil(grupal * 0.5 + notaTecnica * 0.3 + pares * 0.2);
 
             // Guardar en Firestore
             const evaluacion = {
